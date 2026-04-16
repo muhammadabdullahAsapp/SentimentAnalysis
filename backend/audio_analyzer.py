@@ -11,7 +11,8 @@ class AudioAnalyzer:
         self.model, self.utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
                                               model='silero_vad',
                                               force_reload=False,
-                                              onnx=False) # Cloud Run has enough RAM for torch
+                                              onnx=False,
+                                              trust_repo=True) # <-- This is the new line!
         (self.get_speech_timestamps, _, self.read_audio, _, _) = self.utils
         self.sampling_rate = 16000 # Silero VAD expects 16kHz
 
