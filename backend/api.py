@@ -145,6 +145,9 @@ async def analyze_audio(data: AudioData):
                         "current_silence_ms": 0
                     }
                 
+                if 'audio_buffer' not in session:
+                    session['audio_buffer'] = np.array([], dtype=np.float32)
+                
                 # Robustness for face state (if session was created by audio)
                 if 'stability_history' not in session:
                     session['stability_history'] = [1.0] * 10
@@ -180,12 +183,43 @@ async def analyze_audio(data: AudioData):
                 total_time = s_stats.get('speech_ms', 0) + s_stats.get('silence_ms', 0)
                 fluency = (s_stats.get('speech_ms', 0) / total_time * 100) if total_time > 0 else 100
                 
+                # Buffer Management & Transcription
+                samples = stats.pop("samples", None)
+                transcription = ""
+                is_final = False
+                
+                if samples is not None and len(samples) > 0:
+                    session['audio_buffer'] = np.concatenate((session['audio_buffer'], samples))
+                    
+                    # Determine if we should flush the buffer (finalize the text)
+                    is_flush = False
+                    if stats.get('trailing_silence_ms', 0) > 1200:
+                        is_flush = True
+                    elif stats.get('speech_ms', 0) == 0 and len(session['audio_buffer']) > len(samples):
+                        # Chunk was totally silent, meaning user paused. Flush previous speech.
+                        is_flush = True
+                    elif len(session['audio_buffer']) >= 16000 * 15:
+                        # Max buffer size reached (15s)
+                        is_flush = True
+
+                    # Transcribe current buffer
+                    # Only transcribe if the buffer isn't pure silence
+                    # (we know there's speech if buffer length > silent chunk length)
+                    if len(session['audio_buffer']) > 0:
+                        transcription = audio_analyzer.transcribe_buffer(session['audio_buffer'])
+                        
+                    if is_flush:
+                        session['audio_buffer'] = np.array([], dtype=np.float32)
+                        is_final = True
+                
                 return {
                     "success": True,
                     "fluency": round(fluency, 2),
                     "is_speaking": stats.get('speech_ms', 0) > 0,
                     "vocal_status": status,
-                    "silence_streak": round(streak / 1000, 1)
+                    "silence_streak": round(streak / 1000, 1),
+                    "transcription": transcription,
+                    "is_final": is_final
                 }
         
         return {"success": False, "error": "Could not analyze audio"}

@@ -12,3 +12,4 @@ onnxruntime
 silero-vad
 torch
 python-multipart==0.0.22
+faster-whisper

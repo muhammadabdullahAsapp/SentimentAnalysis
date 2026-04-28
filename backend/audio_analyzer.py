@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from pydub import AudioSegment
 import io
+from faster_whisper import WhisperModel
 
 class AudioAnalyzer:
     def __init__(self):
@@ -15,6 +16,9 @@ class AudioAnalyzer:
                                               trust_repo=True) # <-- This is the new line!
         (self.get_speech_timestamps, _, self.read_audio, _, _) = self.utils
         self.sampling_rate = 16000 # Silero VAD expects 16kHz
+        
+        # Load Faster-Whisper Model (Upgraded from tiny to base for better accuracy)
+        self.whisper_model = WhisperModel("base.en", device="cpu", compute_type="int8")
 
     def process_audio_blob(self, audio_base64):
         """
@@ -49,18 +53,37 @@ class AudioAnalyzer:
             
             total_silence_ms = total_duration_ms - total_speech_ms
             
-            # Calculate trailing silence (silence at the end of the blob)
             trailing_silence_ms = total_duration_ms
             if len(speech_timestamps) > 0:
                 last_end_ms = (speech_timestamps[-1]['end'] / self.sampling_rate) * 1000
                 trailing_silence_ms = total_duration_ms - last_end_ms
 
+            # Return stats AND the raw samples for buffering
             return {
                 "speech_ms": total_speech_ms,
                 "silence_ms": total_silence_ms,
                 "trailing_silence_ms": max(0, trailing_silence_ms),
-                "duration_ms": total_duration_ms
+                "duration_ms": total_duration_ms,
+                "samples": samples
             }
         except Exception as e:
             print(f"Audio Analysis Error: {e}")
             return None
+
+    def transcribe_buffer(self, samples):
+        """
+        Transcribes an accumulated buffer of audio samples.
+        """
+        transcription_text = ""
+        try:
+            segments, info = self.whisper_model.transcribe(
+                samples, 
+                beam_size=5,
+                vad_filter=True,
+                condition_on_previous_text=False,
+                no_speech_threshold=0.6
+            )
+            transcription_text = " ".join([segment.text for segment in segments])
+        except Exception as e:
+            print(f"Whisper Error: {e}")
+        return transcription_text.strip()
